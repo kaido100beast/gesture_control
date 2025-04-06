@@ -1,5 +1,4 @@
-# gesture_control 
-Sure! Here's the updated `README.md` with the code blocks removed and presented as plain text instructions:
+# gesture_control
 
 ---
 
@@ -116,5 +115,3 @@ This project is licensed under the MIT License.
 - Tkinter
 
 ---
-
-Let me know if you'd like me to also prepare the `requirements.txt`, a project banner, or a simple walkthrough video script for your GitHub.
