@@ -2,13 +2,14 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import tkinter as tk
-from tkinter import ttk, simpledialog, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import subprocess
 import joblib
 import json
 import os
 import time
+import fnmatch
 
 def open_program(program_path):
     try:
@@ -17,10 +18,23 @@ def open_program(program_path):
     except Exception as e:
         print(f"Error opening {program_path}: {e}")
 
+def if_exe(directory, file):
+    ls = file.split(directory)
+    return ('\\' not in ls[1])
+
+def list_exe_files(directory):
+    exe_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in fnmatch.filter(files, '*.exe'):
+            full_path = os.path.join(root, file)
+            if if_exe(directory, full_path):
+                exe_files.append(full_path)
+    return exe_files
+
 class HandGestureApp:
     def __init__(self, root):
-        self.last_action_time = 0  # For cooldown
-        self.cooldown_seconds = 2  # Adjust as needed
+        self.last_action_time = 0
+        self.cooldown_seconds = 2
 
         self.root = root
         self.root.title("Hand Gesture Recognition")
@@ -71,35 +85,27 @@ class HandGestureApp:
 
     def update(self):
         ret, frame = self.cap.read()
-
         if ret and self.is_recognition_started:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             results = self.hands.process(rgb_frame)
-
             if results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
                     landmarks = []
                     for lm in hand_landmarks.landmark:
                         landmarks.extend([lm.x, lm.y, lm.z])
-
                     try:
                         prediction = self.model.predict([landmarks])[0]
                         current_time = time.time()
-
-                        # Only perform the action if cooldown has passed
                         if current_time - self.last_action_time > self.cooldown_seconds:
                             self.label.config(text=f"Detected: {prediction}")
                             self.perform_action(prediction)
                             self.last_action_time = current_time
                             self.stop_gesture_recognition()
-
                     except Exception as e:
                         print(f"Prediction error: {e}")
-
                     mp.solutions.drawing_utils.draw_landmarks(
                         frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS
                     )
-
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (640, 480))
         img = Image.fromarray(img)
@@ -111,17 +117,19 @@ class HandGestureApp:
     def start_gesture_recognition(self):
         self.label.config(text="Prepare your gesture...")
         self.root.update()
-        time.sleep(2)  # Give the user 2 seconds to pose
+        time.sleep(2)
         self.label.config(text="Recognition Started")
         self.is_recognition_started = True
 
+    def stop_gesture_recognition(self):
+        self.is_recognition_started = False
+        self.label.config(text="Gesture Action Executed")
+
     def register_gesture(self):
-        # Show dropdown with available gesture labels from the model
         if not hasattr(self.model, 'classes_'):
             messagebox.showerror("Model Error", "Model does not contain gesture labels.")
             return
 
-        # Create a new popup window
         popup = tk.Toplevel(self.root)
         popup.title("Register Gesture")
 
@@ -130,28 +138,42 @@ class HandGestureApp:
         gesture_combo = ttk.Combobox(popup, textvariable=gesture_var, values=list(self.model.classes_))
         gesture_combo.pack(pady=5)
 
-        def choose_app():
+        # Application Tray
+        ttk.Label(popup, text="Select from Application Tray:").pack(pady=5)
+        directory = 'C:\\Users\\BarnwalA\\AppData\\Local\\Microsoft\\WindowsApps\\'
+        app_files = list_exe_files(directory)
+        app_var = tk.StringVar(popup)
+        app_combo = ttk.Combobox(popup, textvariable=app_var, values=app_files, width=60)
+        app_combo.pack(pady=5)
+
+        def select_manual_file():
+            path = filedialog.askopenfilename(title="Select .exe File", filetypes=[("Executable Files", "*.exe")])
+            if path:
+                app_var.set(path)
+
+        ttk.Button(popup, text="Browse Manually", command=select_manual_file).pack(pady=5)
+
+        def save_gesture_app():
             selected_gesture = gesture_var.get()
-            if not selected_gesture:
-                messagebox.showwarning("No Gesture", "Please select a gesture.")
+            selected_app = app_var.get()
+            if not selected_gesture or not selected_app:
+                messagebox.showwarning("Input Required", "Select both gesture and application.")
                 return
+            self.gesture_actions[selected_gesture] = selected_app
+            self.save_gesture_actions()
+            messagebox.showinfo("Registered", f"Gesture '{selected_gesture}' linked to: {selected_app}")
+            popup.destroy()
 
-            app_path = filedialog.askopenfilename(title=f"Select application for '{selected_gesture}'",
-                                                  filetypes=[("Executable Files", "*.exe")])
-            if app_path:
-                self.gesture_actions[selected_gesture] = app_path
-                self.save_gesture_actions()
-                messagebox.showinfo("Registered", f"Gesture '{selected_gesture}' linked to: {app_path}")
-                popup.destroy()
-
-        ttk.Button(popup, text="Select App", command=choose_app).pack(pady=10)
+        ttk.Button(popup, text="Save", command=save_gesture_app).pack(pady=10)
 
     def perform_action(self, gesture):
         if gesture in self.gesture_actions:
             try:
-                subprocess.run([self.gesture_actions[gesture]], shell=True)
+                subprocess.run([self.gesture_actions[gesture]], shell=True, check=True)
+            except subprocess.CalledProcessError as e:
+                messagebox.showerror("Execution Error", f"Could not open:\n{self.gesture_actions[gesture]}")
             except Exception as e:
-                print(f"Failed to open {self.gesture_actions[gesture]}: {e}")
+                messagebox.showerror("Error", f"An unexpected error occurred:\n{e}")
 
     def close_app(self):
         self.cap.release()
